@@ -1,0 +1,7 @@
+[project]
+name = "sms-fraud-detector"
+version = "1.0.0"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

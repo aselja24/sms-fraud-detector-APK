@@ -18,6 +18,7 @@ from aiogram.types import Message
 from dotenv import load_dotenv
 
 from detector.check import check
+from detector.gateway import sanitize_sms
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
@@ -52,7 +53,16 @@ async def on_text(message: Message):
         lines.append("\nЧто делать:")
         lines.extend(f"• {advice}" for advice in result["advice"])
 
+    # Сетевой перехват опасных ссылок (Safe Links / SakBol)
+    sanitized = sanitize_sms(text)
+    if sanitized["is_modified"]:
+        lines.append("\n🛡️ Сетевой перехват SakBol (Safe Links):")
+        lines.append("Ссылка в SMS была бы нейтрализована оператором!")
+        lines.append(f"Безопасный вид SMS для абонента:\n«{sanitized['safe_text']}»")
+        lines.append("(Переход по ссылке ведёт на экран блокировки вместо фишинга)")
+
     await message.answer("\n".join(lines))
+
 
 
 async def main():
