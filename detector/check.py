@@ -1,9 +1,11 @@
 import json
 import sys
 
+from detector.config import HIGH
 from detector.features import extract
-from detector.lexicon import ADVICE
+from detector.lexicon import ADVICE, REASONS
 from detector.model import load_weights, predict_score, to_level, top_reasons
+from detector.rules import RULE_ADVICE, RULE_REASONS, hard_rule
 
 _weights = None
 
@@ -20,8 +22,14 @@ def check(text: str) -> dict:
     weights = _get_weights()
     features = extract(text)
     score = predict_score(features, weights)
-    level = to_level(score)
     reasons = top_reasons(features, weights)
+
+    # Жёсткое правило (rules.py) поднимает риск до "high" для просьбы
+    # передать код/данные карты и для просьбы о деньгах с поводом.
+    rule = hard_rule(features)
+    if rule:
+        score = max(score, HIGH)
+    level = to_level(score)
 
     names = weights["features"]
     coef_by_name = dict(zip(names, weights["coef"]))
@@ -31,6 +39,13 @@ def check(text: str) -> dict:
     ]
     hit_features.sort(key=lambda name: coef_by_name[name], reverse=True)
     advice = [ADVICE[name] for name in hit_features]
+    if rule:
+        # Правило «просят код» повторяет признак asks_code — убираем дубль.
+        if rule == "secret_request" and REASONS["asks_code"] in reasons:
+            reasons.remove(REASONS["asks_code"])
+            advice.remove(ADVICE["asks_code"])
+        reasons.insert(0, RULE_REASONS[rule])
+        advice.insert(0, RULE_ADVICE[rule])
 
     return {
         "risk": level,

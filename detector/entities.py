@@ -1,7 +1,7 @@
 import re
 from urllib.parse import urlparse
 
-from detector.config import WHITELIST, BRANDS, SUSPICIOUS_DOMAIN_WORDS
+from detector.config import BRANDS, SUSPICIOUS_DOMAIN_WORDS, SUSPICIOUS_TLDS, WHITELIST
 
 # Ссылка: с протоколом ("https://...") или без него ("mbank-kg.com/verify",
 # "www.optima-login.net", "bit.ly/3xYz") — мошенники часто пропускают https://.
@@ -59,10 +59,13 @@ def is_whitelisted(url: str) -> bool:
 
 
 def is_fake_brand(url: str) -> bool:
-    """Домен не из белого списка, но маскируется под бренд или похож на фишинг."""
+    """Домен не из белого списка, но маскируется под бренд, похож на фишинг
+    или находится в подозрительной зоне (.xyz, .top, .info...)."""
     if is_whitelisted(url):
         return False
     host = _hostname(url)
+    if host.rsplit(".", 1)[-1] in SUSPICIOUS_TLDS:
+        return True
     for word in BRANDS + SUSPICIOUS_DOMAIN_WORDS:
         if word in host:
             return True

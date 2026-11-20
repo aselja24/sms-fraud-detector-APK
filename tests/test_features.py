@@ -100,3 +100,23 @@ def test_deadline_in_digits_is_urgency():
     assert extract("Номер отключат через 30 минут")["urgency"] == 1
     assert extract("Бүгүн 10 мүнөт ичинде төлөңүз")["urgency"] == 1
     assert extract("Автобус 5 мүнөткө кечигип жатат")["urgency"] == 0
+
+
+def test_real_kg_bank_domains_are_not_fake():
+    # Настоящие домены банков/операторов — не подделка бренда...
+    for text in ["Инфо: megacom.kg", "Подробнее на optima24.kg", "Маалымат bakai.kg сайтында"]:
+        assert extract(text)["fake_brand_domain"] == 0, text
+    # ...а бренд в чужом домене — подделка.
+    for text in ["Войдите: optima24-security.com", "Утуш: beeline-utush.xyz", "odengi-bonus.top"]:
+        assert extract(text)["fake_brand_domain"] == 1, text
+
+
+def test_suspicious_tld_is_fake_domain():
+    assert extract("Подробнее: http://promo-2026.xyz/a")["fake_brand_domain"] == 1
+    assert extract("Кирүү: tunduk-login.info")["fake_brand_domain"] == 1
+    assert extract("Меню: https://cafe-navat.example/menu")["fake_brand_domain"] == 0
+
+
+def test_cancel_operation_pretext():
+    f = extract("Балансыңыздан 8000 сом алынууда. Жокко чыгаруу үчүн кодду жибериңиз")
+    assert f["block_threat"] == 1 and f["asks_code"] == 1

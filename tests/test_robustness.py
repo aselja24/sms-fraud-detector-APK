@@ -92,7 +92,7 @@ def test_novel_ok_is_not_high(text):
     assert check(text)["risk"] != "high"
 
 
-@pytest.mark.xfail(reason="одна просьба кода без телефона/ссылки/угрозы — по train слабый сигнал")
 def test_code_request_only_from_security_service():
+    # Одной просьбы кода по train-весам мало, но её ловит правило (rules.py).
     text = "Здравствуйте, это служба безопасности банка. Продиктуйте код из SMS оператору"
     assert check(text)["risk"] == "high"

@@ -119,9 +119,10 @@ def _despace_words(text: str) -> str:
     return " ".join(result)
 
 
-# Слово, разбитое дефисами/точками на 3+ коротких куска: "за-бло-ки-ро-ва-на",
-# "к.о.д". "SIM-карта" (2 куска), даты и ссылки сюда не попадают.
-_SPLIT_WORD_RE = re.compile(r"^(?:[\w@]{1,3}[-.]){2,}[\w@]{1,3}$")
+# Слово, разбитое дефисами/точками/подчёркиваниями на 3+ коротких куска:
+# "за-бло-ки-ро-ва-на", "к.о.д", "к_о_д". "SIM-карта" (2 куска), даты и
+# ссылки сюда не попадают. [^\W_] — буква или цифра (без "_").
+_SPLIT_WORD_RE = re.compile(r"^(?:(?:[^\W_]|@){1,3}[-._]){2,}(?:[^\W_]|@){1,3}$")
 
 
 def _join_split_letters(text: str) -> str:
@@ -130,7 +131,7 @@ def _join_split_letters(text: str) -> str:
         core = word.rstrip(",.!?:;")
         tail = word[len(core):]
         if _SPLIT_WORD_RE.match(core) and any(ch.isalpha() for ch in core):
-            word = re.sub(r"[-.]", "", core) + tail
+            word = re.sub(r"[-._]", "", core) + tail
         words.append(word)
     return " ".join(words)
 

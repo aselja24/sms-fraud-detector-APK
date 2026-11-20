@@ -18,6 +18,7 @@ def test_despaced_word():
 def test_word_split_by_dashes_or_dots():
     assert "заблокирована" in normalize("Карта за-бло-ки-ро-ва-на")
     assert "сообщите код" in normalize("сообщите к.о.д по номеру")
+    assert "отправьте код" in normalize("Отправьте к_о_д подтверждения")
     # Два куска и даты не склеиваются.
     assert "sim-карта" in normalize("Ваша SIM-карта")
     assert "09.12.2026" in normalize("до 09.12.2026")

@@ -3,9 +3,12 @@
 
 Запуск:
     python train.py [data/sms_train.csv] [--dev data/sms_dev.csv]
+    python train.py data/sms_train_augmented_2.csv   # train + обфусцированные копии
 
-Веса обучаются ТОЛЬКО на train, параметр регуляризации C подбирается по
-accuracy на dev. Результат сохраняется в weights.json.
+Веса обучаются только на обучающем файле (sms_train.csv или его
+аугментированной версии — те же 200 SMS плюс по две обфусцированные копии
+каждого), параметр регуляризации C подбирается по accuracy на dev.
+Результат сохраняется в weights.json.
 """
 import argparse
 import csv
@@ -20,7 +23,7 @@ C_CANDIDATES = [0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0]
 
 
 def load_dataset(path: str):
-    with open(path, encoding="utf-8") as f:
+    with open(path, encoding="utf-8-sig", newline="") as f:
         rows = list(csv.DictReader(f))
     X = [[extract(r["text"])[name] for name in FEATURE_NAMES] for r in rows]
     y = [1 if r["label"] == "fraud" else 0 for r in rows]
