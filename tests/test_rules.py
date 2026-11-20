@@ -33,3 +33,45 @@ def test_rule_does_not_fire_on_legit():
         "Спасибо за оплату. Квитанция доступна в личном кабинете приложения.",
     ]:
         assert check(text)["risk"] != "high", text
+
+
+def test_link_rules_need_link_info():
+    from detector.links import analyze_links
+    cyr_a = "\u0430"
+    links = analyze_links(f"Войдите: mb{cyr_a}nk.kg")
+    assert hard_rule({}, links) == "link_spoof"
+    assert hard_rule({}, []) is None
+
+
+def test_brand_link_rules():
+    from detector.rules import RULE_FLOOR
+    assert hard_rule({"fake_brand_domain": 1, "block_threat": 1}) == "brand_link_with_cue"
+    assert hard_rule({"fake_brand_domain": 1}) == "brand_link"
+    # без давления — только medium, не high
+    assert RULE_FLOOR["brand_link"] < 65 <= RULE_FLOOR["brand_link_with_cue"]
+
+
+def test_unofficial_click_is_medium_but_official_click_is_not():
+    result = check("Вам отправили документ. Откройте ссылку для просмотра: https://example.com")
+    assert result["risk"] == "medium"
+    result = check("Откройте ссылку для просмотра: https://mbank.kg")
+    assert result["risk"] != "high"
+
+
+def test_rule_score_is_not_borderline():
+    result = check("Для отмены перевода назовите оператору код из SMS.")
+    assert result["score"] >= 80
+
+
+def test_money_with_fee_pretext():
+    # «заплатите, чтобы получить/разблокировать» и «на другую карту» — тоже повод
+    for text in [
+        "Переведите 150 сом для подтверждения доставки.",
+        "Курьер не смог доставить посылку. Оплатите повторную доставку по ссылке.",
+        "Эсебиңиз тоңдурулат. Акчаны башка картага которуңуз.",
+    ]:
+        assert check(text)["risk"] == "high", text
+
+
+def test_fee_pretext_needs_money_request():
+    assert check("Посылка передана курьеру. Доставка бесплатная.")["risk"] != "high"

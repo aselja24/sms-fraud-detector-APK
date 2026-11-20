@@ -16,6 +16,7 @@
 
 import re
 
+from detector.homoglyphs import INVISIBLE_RE
 from detector.translit import fold
 
 # Цифры/символы -> кириллица (похожие по написанию).
@@ -178,6 +179,8 @@ def _fix_homoglyphs(text: str) -> str:
 
 def normalize(text: str) -> str:
     """Приводит текст SMS к виду, пригодному для поиска признаков по словарю."""
+    # Невидимые символы внутри слов («мо\u200bшенник») мешают словарю.
+    text = INVISIBLE_RE.sub("", text)
     text = _join_split_letters(text)
     text = _despace_words(text)
     text = _fix_homoglyphs(text)

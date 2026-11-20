@@ -26,10 +26,21 @@ WHITELIST = [
     "odengi.kg",
     "tunduk.kg",
     "salyk.kg",
+    # Крупные международные сервисы, под которые часто маскируются ссылки
+    # (бренды — в GLOBAL_BRANDS ниже; без этого их настоящие сайты считались
+    # бы подделкой).
+    "telegram.org",
+    "whatsapp.com",
+    "instagram.com",
+    "google.com",
+    "binance.com",
 ]
 
+# Международные бренды: под них подделывают адреса так же, как под местные банки.
+GLOBAL_BRANDS = ["telegram", "whatsapp", "instagram", "google", "binance"]
+
 # Названия брендов (банки, операторы), которыми маскируются фишинговые домены.
-BRANDS = [
+_LOCAL_BRANDS = [
     "beeline",
     "megacom",
     "mbank",
@@ -49,6 +60,28 @@ BRANDS = [
     "salyk",
     "kyrgyzpost",
 ]
+BRANDS = _LOCAL_BRANDS + GLOBAL_BRANDS
+
+# Настоящий сайт бренда — для подсказки «Официальный сайт: ...» в совете.
+# Только домены, в которых уверены (список ТЗ и настоящие домены из учебных
+# SMS); для остальных брендов подсказки нет, чтобы не назвать чужой адрес.
+BRAND_OFFICIAL = {
+    "mbank": "mbank.kg",
+    "beeline": "beeline.kg",
+    "balance": "balance.kg",
+    "nbkr": "nbkr.kg",
+    "megacom": "megacom.kg",
+    "optima": "optima24.kg",
+    "bakai": "bakai.kg",
+    "demir": "demirbank.kg",
+    "tunduk": "tunduk.kg",
+    "keremet": "keremetbank.kg",
+    "telegram": "telegram.org",
+    "whatsapp": "whatsapp.com",
+    "instagram": "instagram.com",
+    "google": "google.com",
+    "binance": "binance.com",
+}
 
 # Слова в домене, типичные для фишинговых ссылок (включая известные сокращатели ссылок).
 SUSPICIOUS_DOMAIN_WORDS = [
@@ -59,6 +92,12 @@ SUSPICIOUS_DOMAIN_WORDS = [
     "gift",
     "prize",
     "check",
+    "confirm",
+    "support",
+    "help",
+    "update",
+    "unlock",
+    "recover",
     "online",
     "cashback",
     "bit-ly",
@@ -86,6 +125,10 @@ SUSPICIOUS_TLDS = ["xyz", "top", "info", "site", "pw", "click", "icu", "buzz", "
 # Границы уровней риска (0-100).
 LOW = 30
 HIGH = 65
+
+# Нижняя граница score, когда сработало жёсткое правило "high" (rules.py).
+# Выше HIGH, чтобы ответ не выглядел «на грани».
+RULE_HIGH_SCORE = 80
 
 # Путь к обученным весам модели.
 WEIGHTS_PATH = os.path.join(os.path.dirname(__file__), "..", "weights.json")

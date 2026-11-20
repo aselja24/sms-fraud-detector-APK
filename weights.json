@@ -32,5 +32,9 @@
     1.6649314111167404
   ],
   "intercept": -3.5550446420824455,
-  "C": 1.0
+  "C": 1.0,
+  "trained_on": [
+    "data/sms_train.csv"
+  ],
+  "n_examples": 200
 }

@@ -1,8 +1,9 @@
 """Извлечение признаков из текста SMS для модели логистической регрессии."""
 import re
 
-from detector.entities import find_phones, find_urls, is_fake_brand, is_foreign_phone
-from detector.lexicon import CODE_REQUEST_VERBS, NO_TRANSLIT, PATTERNS
+from detector.entities import find_phones, is_foreign_phone
+from detector.lexicon import CHECK_REQUEST, CODE_REQUEST_VERBS, NO_TRANSLIT, PATTERNS
+from detector.links import analyze_links
 from detector.normalize import normalize
 from detector.translit import expand_roots
 
@@ -44,12 +45,13 @@ _LEXICON_FEATURES = [
 # варианты: один кириллический корень ловит RU/KG, KG без раскладки и транслит.
 _ROOTS = {name: expand_roots(PATTERNS[name], NO_TRANSLIT) for name in _LEXICON_FEATURES}
 _CODE_VERBS = expand_roots(CODE_REQUEST_VERBS, NO_TRANSLIT)
+_CHECK_ROOTS = expand_roots(CHECK_REQUEST, NO_TRANSLIT)
 
 
-# Короткий срок в цифрах — давление срочностью: «через 30 минут»,
+# Короткий срок в цифрах — давление срочностью: «через 30 минут», «за 5 минут»,
 # «в течение 2 часов», «10 мүнөт ичинде», «20 мүнөттөн кийин».
 _DEADLINE_RE = re.compile(
-    r"через \d+ (?:мин|час)|в течение \d+ (?:мин|час)"
+    r"(?:через|в течение|за) \d+ (?:мин|час)"
     r"|\d+ (?:мунот|саат)\w* (?:ичинде|кийин)"
     r"|\d+ (?:minut|munot|saat)\w* (?:ichinde|kiyin|kiin)"
 )
@@ -73,13 +75,14 @@ def extract(text: str) -> dict[str, int]:
     Ссылки и телефоны извлекаются из СЫРОГО текста (до нормализации), а
     текстовые признаки — из нормализованного (без обфускации) текста.
     """
-    urls = find_urls(text)
+    links = analyze_links(text)
     phones = find_phones(text)
     normalized = normalize(text)
 
     features = {
-        "has_link": int(bool(urls)),
-        "fake_brand_domain": int(any(is_fake_brand(u) for u in urls)),
+        "has_link": int(bool(links)),
+        # подделка (подмена символов) или имитация бренда — см. links.py
+        "fake_brand_domain": int(any(link.fake for link in links)),
         "has_phone": int(bool(phones)),
         "foreign_phone": int(any(is_foreign_phone(p) for p in phones)),
     }
@@ -98,9 +101,12 @@ def extract(text: str) -> dict[str, int]:
     # мошенничества есть такая просьба, у обычных уведомлений — редко.
     # Отдельный признак нужен, чтобы модель училась на него целиком, а не
     # делила вес между четырьмя частными просьбами.
+    # «Проверьте/текшериңиз» — тоже просьба, но без перехода по ссылке
+    # (поэтому не в link_action: иначе она считалась бы дважды).
+    asks_check = any(root in normalized for root in _CHECK_ROOTS)
     features["action_request"] = int(
         features["asks_code"] or features["money_transfer"]
-        or features["call_back"] or features["link_action"]
+        or features["call_back"] or features["link_action"] or asks_check
     )
 
     return {name: features[name] for name in FEATURE_NAMES}
