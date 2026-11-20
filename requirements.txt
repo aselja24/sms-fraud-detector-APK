@@ -3,3 +3,6 @@ pandas
 pytest
 aiogram
 python-dotenv
+# чтение скриншотов в боте (нужен ещё сам Tesseract, см. bot/ocr.py)
+Pillow
+pytesseract

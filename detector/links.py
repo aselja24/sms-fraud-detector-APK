@@ -190,7 +190,8 @@ def analyze_link(url: str) -> LinkInfo:
     if near:
         info.brand_fake = True
         info.lookalike = near
-        info.details.append(f"имя домена «{label}» почти как у «{near}»")
+        if not info.spoof:   # при подмене символов причина уже объяснена точнее
+            info.details.append(f"имя домена «{label}» почти как у «{near}»")
         if info.hint is None:
             info.hint = BRAND_OFFICIAL[near]
 
