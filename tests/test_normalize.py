@@ -15,6 +15,14 @@ def test_despaced_word():
     assert "заблокирована" in normalize(text)
 
 
+def test_word_split_by_dashes_or_dots():
+    assert "заблокирована" in normalize("Карта за-бло-ки-ро-ва-на")
+    assert "сообщите код" in normalize("сообщите к.о.д по номеру")
+    # Два куска и даты не склеиваются.
+    assert "sim-карта" in normalize("Ваша SIM-карта")
+    assert "09.12.2026" in normalize("до 09.12.2026")
+
+
 def test_real_number_not_corrupted():
     # "10до" — это число 10, а не обфускация буквы "о".
     assert "10до" in normalize("Эртең саат 10до жолугалы")

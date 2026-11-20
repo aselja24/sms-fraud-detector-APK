@@ -1,6 +1,6 @@
 """Извлечение признаков из текста SMS для модели логистической регрессии."""
 from detector.entities import find_phones, find_urls, is_fake_brand, is_foreign_phone
-from detector.lexicon import PATTERNS
+from detector.lexicon import CODE_REQUEST_VERBS, PATTERNS
 from detector.normalize import normalize
 
 # Фиксированный порядок признаков — важен для model.py (веса обучены в этом порядке).
@@ -58,5 +58,8 @@ def extract(text: str) -> dict[str, int]:
     }
     for name in _LEXICON_FEATURES:
         features[name] = _lexicon_hit(normalized, name)
+    # «код» сам по себе есть и в легитимных SMS — нужна ещё просьба его передать.
+    asks_verb = any(verb in normalized for verb in CODE_REQUEST_VERBS)
+    features["asks_code"] = int(features["asks_code"] and asks_verb)
 
     return {name: features[name] for name in FEATURE_NAMES}

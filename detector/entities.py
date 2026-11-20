@@ -1,15 +1,12 @@
-"""
-Извлечение сущностей (ссылки, телефоны) из СЫРОГО текста — до нормализации,
-чтобы обфускация цифр/букв не мешала их распознать как единое целое.
-"""
 import re
 from urllib.parse import urlparse
 
 from detector.config import WHITELIST, BRANDS, SUSPICIOUS_DOMAIN_WORDS
 
 URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
-# Телефон: + и/или цифры, допускаются пробелы между группами цифр.
-PHONE_RE = re.compile(r"(?<!\d)\+?\d[\d\s]{6,}\d(?!\d)")
+# Телефон: + и/или цифры; между группами цифр допускаются пробелы, дефисы
+# и скобки ("0555-12-34-56", "+996 (555) 123456"). Точки нет — это даты.
+PHONE_RE = re.compile(r"(?<!\d)\+?\d[\d\s\-()]{6,}\d(?!\d)")
 
 
 def find_urls(text: str) -> list[str]:

@@ -1,8 +1,6 @@
 """
 Оценка детектора на размеченном CSV.
-
-Запуск:
-    python evaluate.py data/sms_dev.csv
+Запуск: python evaluate.py data/sms_dev.csv
 
 fraud считается тогда, когда risk == "high" (low и medium == ok, как в
 data/CLARIFICATIONS_RU.md).

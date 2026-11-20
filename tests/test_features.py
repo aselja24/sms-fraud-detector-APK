@@ -12,8 +12,28 @@ def test_feature_names_count_and_order():
 
 def test_safety_warning_on_do_not_share_code():
     f = extract("Ваш код подтверждения: 1234. Не сообщайте его никому")
-    assert f["asks_code"] == 1
+    # «код» есть, но просьбы его передать нет («не сообщайте» != «сообщите»).
+    assert f["asks_code"] == 0
     assert f["safety_warning"] == 1
+
+
+def test_asks_code_needs_request_verb():
+    assert extract("Сообщите код из SMS")["asks_code"] == 1
+    assert extract("Продиктуйте CVV оператору")["asks_code"] == 1
+    assert extract("Картаңыз бөгөттөлдү, кодду жибериңиз")["asks_code"] == 1
+    assert extract("Soobshite kod iz SMS")["asks_code"] == 1
+    assert extract("Код для входа: 5521")["asks_code"] == 0
+
+
+def test_phone_with_dashes_and_parentheses():
+    assert extract("Звоните 0555-12-34-56")["has_phone"] == 1
+    assert extract("Звоните +996 (555) 123456")["has_phone"] == 1
+    assert extract("Оплатите до 09.12.2026")["has_phone"] == 0
+
+
+def test_domain_imitating_kg_zone_is_fake():
+    assert extract("Оплатите: https://post-kg.example/pay")["fake_brand_domain"] == 1
+    assert extract("Оплата: https://my.beeline.kg")["fake_brand_domain"] == 0
 
 
 def test_lookalike_domain_is_not_whitelisted():

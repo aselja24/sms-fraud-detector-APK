@@ -1,8 +1,3 @@
-"""
-Детектор фишинговых SMS.
-
-CLI: python -m detector.check "текст сообщения"
-"""
 import json
 import sys
 
