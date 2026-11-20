@@ -1,5 +1,6 @@
 __pycache__/
 .venv/
 .env
+bot/.env
 .DS_Store
 data/feedback/
