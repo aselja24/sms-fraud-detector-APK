@@ -107,10 +107,33 @@ def render(result: dict, lang: str) -> str:
     )]
     if result["reasons"]:
         lines.append("\n" + ui["reasons"])
-        lines.extend(f"• {translate(r, lang)}" for r in result["reasons"])
+        lines.extend(f"• {html.escape(translate(r, lang))}" for r in result["reasons"])
+    elif result["risk"] == "low":
+        lines.append(
+            "\n" + (
+                "✅ <b>Признаков мошенничества не обнаружено:</b>\n"
+                "• Текст не содержит опасных ссылок, скрытых символов или омоглифов.\n"
+                "• Нет признаков социальной инженерии и требований срочных переводов."
+                if lang == "ru" else
+                "✅ <b>Алдамчылыктын белгилери табылган жок:</b>\n"
+                "• Билдирүүдө кооптуу шилтемелер, жашыруун же окшош тамгалар жок.\n"
+                "• Эсептерди бөгөттөө же шашылыш акча которуу талаптары табылган жок."
+            )
+        )
+
     if result["advice"]:
         lines.append("\n" + ui["advice"])
-        lines.extend(f"• {translate(a, lang)}" for a in result["advice"])
+        lines.extend(f"• {html.escape(translate(a, lang))}" for a in result["advice"])
+    elif result["risk"] == "low":
+        lines.append(
+            "\n" + (
+                "💡 <b>Совет по безопасности:</b>\n"
+                "• Никогда и никому не сообщайте коды из SMS, пароли и CVC-код с карты."
+                if lang == "ru" else
+                "💡 <b>Коопсуздук кеңеши:</b>\n"
+                "• SMS-коддорду, сырсөздөрдү жана картанын CVC-кодун эч кимге айтпаңыз."
+            )
+        )
     return "\n".join(lines)
 
 
@@ -129,13 +152,32 @@ def share_url(result: dict, lang: str) -> str | None:
     return "https://t.me/share/url?url=" + quote(text)
 
 
-def result_keyboard(key: str, lang: str, share: str | None) -> InlineKeyboardMarkup | None:
-    """Клавиатура под результатом проверки (только кнопка «Поделиться», если есть угроза)."""
+def result_keyboard(
+    key: str,
+    lang: str,
+    share: str | None,
+    action_type: str = "sms",
+) -> InlineKeyboardMarkup:
+    """Клавиатура под результатом проверки (Поделиться + Меню / Проверить ещё)."""
+    rows = []
     if share:
-        return InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text=t("share_btn", lang), url=share)
-        ]])
-    return None
+        rows.append([InlineKeyboardButton(text=t("share_btn", lang), url=share)])
+
+    next_text = (
+        "💬 Проверить ещё SMS" if lang == "ru" else "💬 Дагы SMS текшерүү"
+    ) if action_type == "sms" else (
+        "🔗 Проверить другую ссылку" if lang == "ru" else "🔗 Башка шилтеме"
+    )
+    next_callback = "act:sms" if action_type == "sms" else "act:link"
+
+    rows.append([
+        InlineKeyboardButton(text=next_text, callback_data=next_callback),
+        InlineKeyboardButton(
+            text="🏠 В главное меню" if lang == "ru" else "🏠 Башкы меню",
+            callback_data="act:main",
+        ),
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def lang_keyboard() -> InlineKeyboardMarkup:
@@ -263,7 +305,7 @@ async def reply_with_check(message: Message, text: str, lang: str, prefix: str =
 
     await message.answer(
         body,
-        reply_markup=result_keyboard(key, lang, share_url(result, lang)),
+        reply_markup=result_keyboard(key, lang, share_url(result, lang), action_type="sms"),
         parse_mode=ParseMode.HTML,
     )
 
@@ -278,7 +320,7 @@ async def reply_with_link_check(message: Message, target_url: str, lang: str) ->
 
     await message.answer(
         body,
-        reply_markup=result_keyboard(key, lang, share_url(result, lang)),
+        reply_markup=result_keyboard(key, lang, share_url(result, lang), action_type="link"),
         parse_mode=ParseMode.HTML,
     )
 
@@ -294,18 +336,14 @@ def _ocr_ready() -> bool:
 
 
 @dp.message(CommandStart())
-async def on_start(message: Message, state: FSMContext):
-    await state.clear()
-    lang = user_lang(message.from_user)
-    await message.answer(
-        t("menu_title", lang),
-        reply_markup=main_menu_inline(lang),
-        parse_mode=ParseMode.HTML,
-    )
-
-
 @dp.message(Command("menu"))
-async def on_menu(message: Message, state: FSMContext):
+@dp.message(F.text.lower().in_([
+    "/start", "start", "старт", "баштоо",
+    "/menu", "menu", "меню",
+    "главное меню", "башкы меню",
+    "привет", "салам", "здравствуйте", "саламатсызбы",
+]))
+async def on_start(message: Message, state: FSMContext):
     await state.clear()
     lang = user_lang(message.from_user)
     await message.answer(
@@ -333,6 +371,12 @@ async def on_lang(message: Message):
 @dp.message(F.text.in_([
     "💬 Проверить подозрительное SMS",
     "💬 Шектүү SMSти текшерүү",
+    "Проверить подозрительное SMS",
+    "Шектүү SMSти текшерүү",
+    "Проверить SMS",
+    "SMS текшерүү",
+    "смс",
+    "sms",
 ]))
 async def on_text_btn_sms(message: Message, state: FSMContext):
     lang = user_lang(message.from_user)
@@ -345,6 +389,8 @@ async def on_text_btn_sms(message: Message, state: FSMContext):
     "🔗 Шилтемени текшерүү",
     "Проверить ссылку",
     "Шилтемени текшерүү",
+    "ссылка",
+    "шилтеме",
 ]))
 async def on_text_btn_link(message: Message, state: FSMContext):
     lang = user_lang(message.from_user)
@@ -357,6 +403,10 @@ async def on_text_btn_link(message: Message, state: FSMContext):
     "⚠️ Мен алданып калдым",
     "Я уже попался на уловку",
     "Мен алданып калдым",
+    "sos",
+    "сос",
+    "помощь",
+    "жардам",
 ]))
 async def on_text_btn_sos(message: Message, state: FSMContext):
     await state.clear()
