@@ -1,21 +1,9 @@
 """
-Telegram-бот: присылает в ответ на SMS оценку риска мошенничества.
-
-Что умеет:
-  * текст SMS или скриншот SMS (распознаётся через Tesseract, bot/ocr.py);
-  * два языка — кыргызча и русский (/lang); по умолчанию язык Telegram;
-  * кнопки «🚨 Это мошенничество» / «✅ Не мошенничество»: отметки пишутся в
-    data/feedback/feedback.csv (bot/feedback.py) для дообучения:
-        python train.py --extra data/feedback/feedback.csv
-  * «📤 Предупредить близких» — пользователь сам пересылает предупреждение
-    (без самой ссылки из SMS) в любой свой чат через стандартное окно
-    Telegram «Поделиться». Бот никому не пишет сам.
-
 Запуск:
     python -m bot.bot
-Токен берётся из переменной окружения BOT_TOKEN (файл bot/.env).
 """
 import asyncio
+import html
 import io
 import logging
 import os
@@ -27,8 +15,18 @@ from urllib.parse import quote
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from aiogram import Bot, Dispatcher, F
+from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    Message,
+    ReplyKeyboardMarkup,
+)
 from dotenv import load_dotenv
 
 from bot import ocr
@@ -36,6 +34,7 @@ from bot.feedback import save_feedback
 from bot.i18n import LANGS, UI, t, translate
 from detector.check import check
 from detector.entities import find_urls
+from detector.links import analyze_links
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
@@ -46,9 +45,26 @@ _MAX_SHOWN_OCR = 400
 # только 64 байта, поэтому сам текст храним здесь, а в кнопке — короткий ключ.
 _pending: "OrderedDict[str, tuple[str, str]]" = OrderedDict()
 _MAX_PENDING = 1000
-# Выбранный язык — только в памяти процесса: id пользователей на диск не пишем.
+
+# Выбранный язык — в памяти процесса (id пользователей на диск не пишем).
 _user_lang: dict[int, str] = {}
 _ocr_ok: bool | None = None
+
+
+class BotStates(StatesGroup):
+    waiting_for_sms = State()
+    waiting_for_link = State()
+
+
+# Нижнее меню: общие для обоих языков кнопки.
+BTN_LANG = "🌐 Тил / Язык"
+BTN_HELP = "ℹ️ Помощь / Жардам"
+
+
+def _all_langs(key: str) -> list[str]:
+    """Текст кнопки на всех языках — для фильтра F.text.in_()."""
+    return [UI[lang][key] for lang in LANGS]
+
 
 dp = Dispatcher()
 
@@ -63,8 +79,13 @@ def user_lang(user) -> str:
 
 
 def render(result: dict, lang: str) -> str:
-    """Ответ check() текстом на нужном языке."""
+    """Ответ check() на нужном языке, готовый для parse_mode=HTML.
+
+    Причины содержат куски SMS (адрес, слова), поэтому экранируются: «<» или
+    «&» в тексте мошенников иначе сломали бы разметку, и Telegram не принял
+    бы ответ вовсе."""
     ui = UI[lang]
+    esc = html.escape
     lines = [ui["risk_line"].format(
         emoji=LEVEL_EMOJI.get(result["risk"], "❓"),
         level=ui["risk"][result["risk"]],
@@ -72,10 +93,10 @@ def render(result: dict, lang: str) -> str:
     )]
     if result["reasons"]:
         lines.append("\n" + ui["reasons"])
-        lines.extend(f"• {translate(r, lang)}" for r in result["reasons"])
+        lines.extend(f"• {esc(translate(r, lang))}" for r in result["reasons"])
     if result["advice"]:
         lines.append("\n" + ui["advice"])
-        lines.extend(f"• {translate(a, lang)}" for a in result["advice"])
+        lines.extend(f"• {esc(translate(a, lang))}" for a in result["advice"])
     return "\n".join(lines)
 
 
@@ -95,6 +116,7 @@ def share_url(result: dict, lang: str) -> str | None:
 
 
 def result_keyboard(key: str, lang: str, share: str | None) -> InlineKeyboardMarkup:
+    """Клавиатура под результатом проверки (отметка точности + поделиться)."""
     rows = [[
         InlineKeyboardButton(text=t("btn_fraud", lang), callback_data=f"fb:fraud:{key}"),
         InlineKeyboardButton(text=t("btn_ok", lang), callback_data=f"fb:ok:{key}"),
@@ -105,22 +127,129 @@ def result_keyboard(key: str, lang: str, share: str | None) -> InlineKeyboardMar
 
 
 def lang_keyboard() -> InlineKeyboardMarkup:
+    """Кнопки выбора языка."""
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="Кыргызча 🇰🇬", callback_data="lang:ky"),
         InlineKeyboardButton(text="Русский 🇷🇺", callback_data="lang:ru"),
     ]])
 
 
+def main_menu_inline(lang: str) -> InlineKeyboardMarkup:
+    """Инлайн-карточка выбора действия («Что вас беспокоит?»)."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=t("btn_check_sms", lang), callback_data="act:sms")],
+        [InlineKeyboardButton(text=t("btn_check_link", lang), callback_data="act:link")],
+        [InlineKeyboardButton(text=t("btn_sos", lang), callback_data="act:sos")],
+        [
+            InlineKeyboardButton(
+                text="Кыргызча 🇰🇬" if lang == "ru" else "Русский 🇷🇺",
+                callback_data="lang:ky" if lang == "ru" else "lang:ru",
+            ),
+            InlineKeyboardButton(text=t("btn_help", lang), callback_data="act:help"),
+        ],
+    ])
+
+
+def main_menu_reply(lang: str) -> ReplyKeyboardMarkup:
+    """Постоянная нижняя клавиатура для быстрого доступа с мобильных устройств."""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=t("btn_check_sms", lang))],
+            [KeyboardButton(text=t("btn_check_link", lang))],
+            [KeyboardButton(text=t("btn_sos", lang))],
+            [
+                KeyboardButton(text=BTN_LANG),
+                KeyboardButton(text=BTN_HELP),
+            ],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def sos_inline(lang: str) -> InlineKeyboardMarkup:
+    """Инлайн-кнопки в разделе экстренной помощи."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=t("btn_bank_contacts", lang), callback_data="sos:banks")],
+        [InlineKeyboardButton(text=t("btn_apk_danger", lang), callback_data="sos:apk")],
+        [InlineKeyboardButton(text=t("btn_back_menu", lang), callback_data="act:main")],
+    ])
+
+
+def sos_sub_inline(lang: str) -> InlineKeyboardMarkup:
+    """Кнопки возврата из подразделов экстренной помощи."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=t("btn_back_sos", lang), callback_data="act:sos")],
+        [InlineKeyboardButton(text=t("btn_back_menu", lang), callback_data="act:main")],
+    ])
+
+
+def format_link_analysis(text: str, lang: str) -> tuple[str, dict] | None:
+    """Подробный разбор первой ссылки в тексте. None — ссылки нет.
+
+    Анализируем исходный текст, а не очищенный адрес: в «mb<нулевой
+    пробел>ank.kg» find_urls() уже убрал невидимый символ, и отдельно взятый
+    адрес выглядел бы как настоящий mbank.kg."""
+    links = analyze_links(text)
+    if not links:
+        return None
+    info = links[0]
+    result = check(text)
+    esc = html.escape
+
+    lines = [t("link_check_title", lang).format(url=esc(info.url)), ""]
+    if info.official:
+        lines.append(t("link_official_desc", lang))
+    elif info.fake:
+        lines.append(t("link_spoof_desc", lang))
+        if info.details:
+            details = "; ".join(translate(d, lang) for d in info.details)
+            lines.append(f"{t('link_details', lang)} <b>{esc(details)}</b>")
+        if info.hint:
+            lines.append(f"{t('link_real_site', lang)} <code>{esc(info.hint)}</code>")
+    else:
+        lines.append(t("link_unknown_desc", lang))
+
+    lines.append("")
+    lines.append(render(result, lang))
+    return "\n".join(lines), result
+
+
 async def reply_with_check(message: Message, text: str, lang: str, prefix: str = "") -> None:
+    """Анализирует текст SMS и отправляет отчёт пользователю."""
     result = check(text)
     key = uuid.uuid4().hex[:12]
     _pending[key] = (text, result["risk"])
     while len(_pending) > _MAX_PENDING:
         _pending.popitem(last=False)
+
     body = render(result, lang)
     if prefix:
         body = prefix + "\n\n" + body
-    await message.answer(body, reply_markup=result_keyboard(key, lang, share_url(result, lang)))
+
+    await message.answer(
+        body,
+        reply_markup=result_keyboard(key, lang, share_url(result, lang)),
+        parse_mode=ParseMode.HTML,
+    )
+
+
+async def reply_with_link_check(message: Message, text: str, lang: str) -> None:
+    """Разбирает ссылку из сообщения и отправляет подробный отчёт."""
+    analysis = format_link_analysis(text, lang)
+    if analysis is None:
+        await message.answer(t("link_no_url", lang), parse_mode=ParseMode.HTML)
+        return
+    body, result = analysis
+    key = uuid.uuid4().hex[:12]
+    _pending[key] = (text, result["risk"])
+    while len(_pending) > _MAX_PENDING:
+        _pending.popitem(last=False)
+
+    await message.answer(
+        body,
+        reply_markup=result_keyboard(key, lang, share_url(result, lang)),
+        parse_mode=ParseMode.HTML,
+    )
 
 
 def _ocr_ready() -> bool:
@@ -130,20 +259,144 @@ def _ocr_ready() -> bool:
     return _ocr_ok
 
 
+# --- Хэндлеры команд ---
+
+
 @dp.message(CommandStart())
-async def on_start(message: Message):
+async def on_start(message: Message, state: FSMContext):
+    await state.clear()
     lang = user_lang(message.from_user)
-    await message.answer(t("start", lang), reply_markup=lang_keyboard())
+    await message.answer(
+        t("menu_title", lang),
+        reply_markup=main_menu_inline(lang),
+        parse_mode=ParseMode.HTML,
+    )
+    # Также обновляем нижнюю клавиатуру
+    await message.answer(
+        "👇",
+        reply_markup=main_menu_reply(lang),
+    )
+
+
+@dp.message(Command("menu"))
+async def on_menu(message: Message, state: FSMContext):
+    await state.clear()
+    lang = user_lang(message.from_user)
+    await message.answer(
+        t("menu_title", lang),
+        reply_markup=main_menu_inline(lang),
+        parse_mode=ParseMode.HTML,
+    )
 
 
 @dp.message(Command("help"))
 async def on_help(message: Message):
-    await message.answer(t("help", user_lang(message.from_user)))
+    lang = user_lang(message.from_user)
+    await message.answer(t("help", lang))
 
 
 @dp.message(Command("lang"))
 async def on_lang(message: Message):
-    await message.answer(t("choose_lang", user_lang(message.from_user)), reply_markup=lang_keyboard())
+    lang = user_lang(message.from_user)
+    await message.answer(t("choose_lang", lang), reply_markup=lang_keyboard())
+
+
+# --- Хэндлеры текстовых кнопок из главного меню ---
+
+
+@dp.message(F.text.in_(_all_langs("btn_check_sms")))
+async def on_text_btn_sms(message: Message, state: FSMContext):
+    lang = user_lang(message.from_user)
+    await state.set_state(BotStates.waiting_for_sms)
+    await message.answer(t("prompt_sms", lang), parse_mode=ParseMode.HTML)
+
+
+@dp.message(F.text.in_(_all_langs("btn_check_link")))
+async def on_text_btn_link(message: Message, state: FSMContext):
+    lang = user_lang(message.from_user)
+    await state.set_state(BotStates.waiting_for_link)
+    await message.answer(t("prompt_link", lang), parse_mode=ParseMode.HTML)
+
+
+@dp.message(F.text.in_(_all_langs("btn_sos")))
+async def on_text_btn_sos(message: Message, state: FSMContext):
+    await state.clear()
+    lang = user_lang(message.from_user)
+    await message.answer(
+        t("sos_text", lang),
+        reply_markup=sos_inline(lang),
+        parse_mode=ParseMode.HTML,
+    )
+
+
+@dp.message(F.text == BTN_LANG)
+async def on_text_btn_lang(message: Message):
+    lang = user_lang(message.from_user)
+    await message.answer(t("choose_lang", lang), reply_markup=lang_keyboard())
+
+
+@dp.message(F.text.in_([BTN_HELP, *_all_langs("btn_help")]))
+async def on_text_btn_help(message: Message):
+    lang = user_lang(message.from_user)
+    await message.answer(t("help", lang))
+
+
+# --- Инлайн-хэндлеры главного меню и SOS ---
+
+
+@dp.callback_query(F.data.startswith("act:"))
+async def on_action_chosen(call: CallbackQuery, state: FSMContext):
+    action = call.data.split(":", 1)[1]
+    lang = user_lang(call.from_user)
+
+    if action == "sms":
+        await state.set_state(BotStates.waiting_for_sms)
+        await call.message.answer(t("prompt_sms", lang), parse_mode=ParseMode.HTML)
+        await call.answer()
+    elif action == "link":
+        await state.set_state(BotStates.waiting_for_link)
+        await call.message.answer(t("prompt_link", lang), parse_mode=ParseMode.HTML)
+        await call.answer()
+    elif action == "sos":
+        await state.clear()
+        await call.message.answer(
+            t("sos_text", lang),
+            reply_markup=sos_inline(lang),
+            parse_mode=ParseMode.HTML,
+        )
+        await call.answer()
+    elif action == "main":
+        await state.clear()
+        await call.message.answer(
+            t("menu_title", lang),
+            reply_markup=main_menu_inline(lang),
+            parse_mode=ParseMode.HTML,
+        )
+        await call.answer()
+    elif action == "help":
+        await call.message.answer(t("help", lang))
+        await call.answer()
+
+
+@dp.callback_query(F.data.startswith("sos:"))
+async def on_sos_sub_chosen(call: CallbackQuery):
+    action = call.data.split(":", 1)[1]
+    lang = user_lang(call.from_user)
+
+    if action == "banks":
+        await call.message.answer(
+            t("bank_contacts_text", lang),
+            reply_markup=sos_sub_inline(lang),
+            parse_mode=ParseMode.HTML,
+        )
+        await call.answer()
+    elif action == "apk":
+        await call.message.answer(
+            t("apk_guide", lang),
+            reply_markup=sos_sub_inline(lang),
+            parse_mode=ParseMode.HTML,
+        )
+        await call.answer()
 
 
 @dp.callback_query(F.data.startswith("lang:"))
@@ -155,7 +408,15 @@ async def on_lang_chosen(call: CallbackQuery):
     _user_lang[call.from_user.id] = lang
     await call.answer(t("lang_set", lang))
     if call.message:
-        await call.message.answer(t("lang_set", lang))
+        await call.message.answer(
+            t("lang_set", lang),
+            reply_markup=main_menu_reply(lang),
+        )
+        await call.message.answer(
+            t("menu_title", lang),
+            reply_markup=main_menu_inline(lang),
+            parse_mode=ParseMode.HTML,
+        )
 
 
 @dp.callback_query(F.data.startswith("fb:"))
@@ -171,13 +432,21 @@ async def on_feedback(call: CallbackQuery):
     await call.answer(t("fb_thanks", lang))
     if call.message:
         # Убираем только кнопки отметки, «Поделиться» оставляем.
-        keep = [row for row in (call.message.reply_markup.inline_keyboard if call.message.reply_markup else [])
-                if all(button.url for button in row)]
-        await call.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=keep) if keep else None)
+        keep = [
+            row for row in (call.message.reply_markup.inline_keyboard if call.message.reply_markup else [])
+            if all(button.url for button in row)
+        ]
+        await call.message.edit_reply_markup(
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keep) if keep else None
+        )
+
+
+# --- Хэндлеры для скриншотов и изображений ---
 
 
 @dp.message(F.photo | F.document.mime_type.startswith("image/"))
-async def on_image(message: Message):
+async def on_image(message: Message, state: FSMContext):
+    await state.clear()
     lang = user_lang(message.from_user)
     if not _ocr_ready():
         await message.answer(t("ocr_unavailable", lang))
@@ -197,15 +466,39 @@ async def on_image(message: Message):
         await message.answer(t("ocr_empty", lang))
         return
     shown = text if len(text) <= _MAX_SHOWN_OCR else text[:_MAX_SHOWN_OCR] + "…"
-    prefix = f"{t('ocr_text', lang)}\n«{shown}»"
+    prefix = f"{t('ocr_text', lang)}\n«{html.escape(shown)}»"
     if find_urls(text):
         prefix += "\n\n" + t("ocr_note", lang)
     await reply_with_check(message, text, lang, prefix)
 
 
+# --- Хэндлер текстовых сообщений ---
+
+
 @dp.message(F.text)
-async def on_text(message: Message):
-    await reply_with_check(message, message.text, user_lang(message.from_user))
+async def on_text(message: Message, state: FSMContext):
+    lang = user_lang(message.from_user)
+    raw = (message.text or "").strip()
+    current_state = await state.get_state()
+
+    # Режим «Проверить ссылку»: разбираем первую ссылку из сообщения.
+    if current_state == BotStates.waiting_for_link:
+        await state.clear()
+        await reply_with_link_check(message, raw, lang)
+        return
+
+    # Режим «Проверить SMS».
+    if current_state == BotStates.waiting_for_sms:
+        await state.clear()
+        await reply_with_check(message, raw, lang)
+        return
+
+    # Без кнопок: одно «слово»-ссылка (mbank.kg, https://...) — разбор ссылки,
+    # всё остальное — проверка SMS.
+    if len(raw.split()) == 1 and find_urls(raw):
+        await reply_with_link_check(message, raw, lang)
+        return
+    await reply_with_check(message, raw, lang)
 
 
 @dp.message()
