@@ -3,7 +3,7 @@ from detector.features import FEATURE_NAMES, extract
 
 
 def test_feature_names_count_and_order():
-    assert len(FEATURE_NAMES) == 13
+    assert len(FEATURE_NAMES) == 14
     assert FEATURE_NAMES[:8] == [
         "has_link", "asks_code", "urgency", "block_threat", "prize",
         "bank_operator", "money_transfer", "call_back",
@@ -82,3 +82,41 @@ def test_prize_kg_root_requires_double_t():
 def test_money_transfer_imperative_vs_warning():
     assert extract("срочно переведи 1500 сом на этот номер")["money_transfer"] == 1
     assert extract("Не переводите деньги незнакомым")["money_transfer"] == 0
+
+
+def test_action_request_is_any_request():
+    assert extract("Перезвоните нам")["action_request"] == 1
+    assert extract("Сообщите код из SMS")["action_request"] == 1
+    assert extract("Спасибо за оплату. Чек в приложении")["action_request"] == 0
+
+
+def test_informal_imperative_but_not_passive():
+    # «жибер» (отправь) — просьба; «жиберилди» (отправлен) — обычное SMS с кодом.
+    assert extract("CVV кодду жана карта номерин жибер")["asks_code"] == 1
+    assert extract("Сизге код жиберилди: 4410")["asks_code"] == 0
+
+
+def test_deadline_in_digits_is_urgency():
+    assert extract("Номер отключат через 30 минут")["urgency"] == 1
+    assert extract("Бүгүн 10 мүнөт ичинде төлөңүз")["urgency"] == 1
+    assert extract("Автобус 5 мүнөткө кечигип жатат")["urgency"] == 0
+
+
+def test_real_kg_bank_domains_are_not_fake():
+    # Настоящие домены банков/операторов — не подделка бренда...
+    for text in ["Инфо: megacom.kg", "Подробнее на optima24.kg", "Маалымат bakai.kg сайтында"]:
+        assert extract(text)["fake_brand_domain"] == 0, text
+    # ...а бренд в чужом домене — подделка.
+    for text in ["Войдите: optima24-security.com", "Утуш: beeline-utush.xyz", "odengi-bonus.top"]:
+        assert extract(text)["fake_brand_domain"] == 1, text
+
+
+def test_suspicious_tld_is_fake_domain():
+    assert extract("Подробнее: http://promo-2026.xyz/a")["fake_brand_domain"] == 1
+    assert extract("Кирүү: tunduk-login.info")["fake_brand_domain"] == 1
+    assert extract("Меню: https://cafe-navat.example/menu")["fake_brand_domain"] == 0
+
+
+def test_cancel_operation_pretext():
+    f = extract("Балансыңыздан 8000 сом алынууда. Жокко чыгаруу үчүн кодду жибериңиз")
+    assert f["block_threat"] == 1 and f["asks_code"] == 1

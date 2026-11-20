@@ -1,9 +1,6 @@
 """
 Оценка детектора на размеченном CSV.
 Запуск: python evaluate.py data/sms_dev.csv
-
-fraud считается тогда, когда risk == "high" (low и medium == ok, как в
-data/CLARIFICATIONS_RU.md).
 """
 import argparse
 import csv
@@ -16,7 +13,7 @@ def main():
     parser.add_argument("csv_path")
     args = parser.parse_args()
 
-    with open(args.csv_path, encoding="utf-8") as f:
+    with open(args.csv_path, encoding="utf-8-sig", newline="") as f:
         rows = list(csv.DictReader(f))
 
     tp = fp = tn = fn = 0
