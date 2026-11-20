@@ -1,15 +1,6 @@
 """
 Telegram-бот «Sakchi AI»: твой помощник по цифровой безопасности.
-
 Функционал:
-  * Проверка подозрительных SMS (текст или скриншот через OCR);
-  * Проверка интернет-ссылок (на омоглифы, подмену символов, скрытые знаки, имитацию брендов);
-  * Экстренная помощь: «⚠️ Я уже попался на уловку» — пошаговый план спасения средств
-    и аккаунтов, горячие линии банков КР, инструкция при установке шпионских APK;
-  * Двуязычный интерфейс: кыргызча / русский (/lang);
-  * Кнопки обратной связи «🚨 Это мошенничество» / «✅ Не мошенничество» для дообучения;
-  * Кнопка «📤 Предупредить близких» (share-ссылка без фишингового адреса).
-
 Запуск:
     python -m bot.bot
 Токен берётся из переменной окружения BOT_TOKEN (файл bot/.env).
@@ -41,11 +32,22 @@ from aiogram.types import (
 )
 from dotenv import load_dotenv
 
-from bot import ocr
-from bot.feedback import save_feedback
-from bot.i18n import LANGS, UI, t, translate
+try:
+    from bot import ocr
+    from bot.feedback import save_feedback
+    from bot.i18n import LANGS, UI, t, translate
+except ImportError:
+    try:
+        from . import ocr
+        from .feedback import save_feedback
+        from .i18n import LANGS, UI, t, translate
+    except ImportError:
+        import ocr  # type: ignore
+        from feedback import save_feedback  # type: ignore
+        from i18n import LANGS, UI, t, translate  # type: ignore
 from detector.check import check
 from detector.entities import find_urls
+from detector.gateway import BRAND_DISPLAY_NAMES, _detect_brand
 from detector.links import analyze_link
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
@@ -67,6 +69,21 @@ class BotStates(StatesGroup):
     waiting_for_sms = State()
     waiting_for_link = State()
 
+
+__all__ = [
+    "ocr",
+    "user_lang",
+    "_user_lang",
+    "render",
+    "share_url",
+    "result_keyboard",
+    "lang_keyboard",
+    "main_menu_inline",
+    "main_menu_reply",
+    "sos_inline",
+    "format_link_analysis",
+    "dp",
+]
 
 dp = Dispatcher()
 
@@ -112,15 +129,13 @@ def share_url(result: dict, lang: str) -> str | None:
     return "https://t.me/share/url?url=" + quote(text)
 
 
-def result_keyboard(key: str, lang: str, share: str | None) -> InlineKeyboardMarkup:
-    """Клавиатура под результатом проверки (отметка точности + поделиться)."""
-    rows = [[
-        InlineKeyboardButton(text=t("btn_fraud", lang), callback_data=f"fb:fraud:{key}"),
-        InlineKeyboardButton(text=t("btn_ok", lang), callback_data=f"fb:ok:{key}"),
-    ]]
+def result_keyboard(key: str, lang: str, share: str | None) -> InlineKeyboardMarkup | None:
+    """Клавиатура под результатом проверки (только кнопка «Поделиться», если есть угроза)."""
     if share:
-        rows.append([InlineKeyboardButton(text=t("share_btn", lang), url=share)])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+        return InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text=t("share_btn", lang), url=share)
+        ]])
+    return None
 
 
 def lang_keyboard() -> InlineKeyboardMarkup:
@@ -137,13 +152,6 @@ def main_menu_inline(lang: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=t("btn_check_sms", lang), callback_data="act:sms")],
         [InlineKeyboardButton(text=t("btn_check_link", lang), callback_data="act:link")],
         [InlineKeyboardButton(text=t("btn_sos", lang), callback_data="act:sos")],
-        [
-            InlineKeyboardButton(
-                text="Кыргызча 🇰🇬" if lang == "ru" else "Русский 🇷🇺",
-                callback_data="lang:ky" if lang == "ru" else "lang:ru",
-            ),
-            InlineKeyboardButton(text="ℹ️ Help", callback_data="act:help"),
-        ],
     ])
 
 
@@ -154,10 +162,6 @@ def main_menu_reply(lang: str) -> ReplyKeyboardMarkup:
             [KeyboardButton(text=t("btn_check_sms", lang))],
             [KeyboardButton(text=t("btn_check_link", lang))],
             [KeyboardButton(text=t("btn_sos", lang))],
-            [
-                KeyboardButton(text="🌐 Тил / Язык"),
-                KeyboardButton(text="ℹ️ Помощь / Жардам"),
-            ],
         ],
         resize_keyboard=True,
     )
@@ -181,29 +185,67 @@ def sos_sub_inline(lang: str) -> InlineKeyboardMarkup:
 
 
 def format_link_analysis(raw_url: str, lang: str) -> tuple[str, dict]:
-    """Глубокий анализ подозрительной ссылки."""
+    """Глубокий анализ ссылки и проверка подмен, аналогично симулятору SakBol Gateway."""
     info = analyze_link(raw_url)
     result = check(raw_url)
-
+    brand_key = _detect_brand(raw_url, "")
+    brand_display = info.hint or (BRAND_DISPLAY_NAMES.get(brand_key, brand_key) if brand_key else None)
     safe_url = html.escape(raw_url)
-    lines = [t("link_check_title", lang).format(url=safe_url), ""]
+
+    lines = [
+        f"🔗 <b>{'Результат проверки ссылки' if lang == 'ru' else 'Шилтемени текшерүүнүн жыйынтыгы'}:</b>",
+        f"<code>{safe_url}</code>\n",
+    ]
 
     if info.official:
-        lines.append(t("link_official_desc", lang))
+        level_text = "НИЗКИЙ / БЕЗОПАСНО" if lang == "ru" else "ТӨМӨН / КООПСУЗ"
+        lines.append(f"🟢 <b>{'Уровень риска:' if lang == 'ru' else 'Коркунуч деңгээли:'}</b> {level_text} ({result['score']}/100)")
+        lines.append(f"✅ <b>{'Официальный проверенный ресурс' if lang == 'ru' else 'Расмий текшерилген ресурс'}</b>\n")
+        desc = (
+            "• Домен входит в официальный белый список доверенных сервисов Кыргызстана.\n"
+            "• Подмены символов, омоглифов и скрытых знаков не обнаружено.\n\n"
+            "💡 <i>Помните: даже на официальных сайтах сотрудники поддержки банков никогда не просят коды из SMS и CVC карты.</i>"
+            if lang == "ru" else
+            "• Домен Кыргызстандын расмий текшерилген ак тизмесине кирет.\n"
+            "• Символдордун алмаштырылышы же жашыруун белгилер табылган жок.\n\n"
+            "💡 <i>Эсиңизде болсун: расмий сайтта да банк кызматкерлери SMS-коддорду жана сырсөздөрдү сурабайт.</i>"
+        )
+        lines.append(desc)
     elif info.fake or info.spoof:
-        lines.append(t("link_spoof_desc", lang))
+        level_text = "ВЫСОКИЙ (ОПАСНО)" if lang == "ru" else "ЖОГОРУ (КООПТУУ)"
+        lines.append(f"🔴 <b>{'Уровень риска:' if lang == 'ru' else 'Коркунуч деңгээли:'}</b> {level_text} ({result['score']}/100)")
+        lines.append(f"⚠️ <b>{'ВНИМАНИЕ: ОПАСНАЯ ПОДДЕЛКА (Фишинг / Спуфинг)!' if lang == 'ru' else 'КӨҢҮЛ БУРУҢУЗ: КООПТУУ ЖАСАЛМА (Фишинг / Спуфинг)!'}</b>\n")
+
         if info.details:
             details_str = "; ".join(translate(d, lang) for d in info.details)
-            label = "• Подмена символов:" if lang == "ru" else "• Белгилердин алмаштырылышы:"
+            label = "• Обнаружена подмена символов:" if lang == "ru" else "• Белгилердин алмаштырылышы:"
             lines.append(f"{label} <b>{html.escape(details_str)}</b>")
-        if info.hint:
-            site_label = "• Настоящий официальный сайт бренда:" if lang == "ru" else "• Бренддин расмий сайты:"
-            lines.append(f"{site_label} <code>{html.escape(info.hint)}</code>")
-    else:
-        lines.append(t("link_unknown_desc", lang))
 
-    lines.append("")
-    lines.append(render(result, lang))
+        if brand_display:
+            b_label = "• Маскируется под бренд:" if lang == "ru" else "• Бренддин атына жамынат:"
+            lines.append(f"{b_label} <b>{html.escape(str(brand_display))}</b>")
+
+        if info.hint:
+            site_label = "• Настоящий официальный сайт:" if lang == "ru" else "• Расмий чыныгы сайт:"
+            lines.append(f"{site_label} <code>https://{html.escape(info.hint)}</code>")
+
+        lines.append("\n🛡 <b>" + ("Что делать:" if lang == "ru" else "Эмне кылуу керек:") + "</b>")
+        lines.append("• " + ("Категорически не переходите по этой ссылке." if lang == "ru" else "Бул шилтемеге таптакыр өтпөңүз."))
+        lines.append("• " + ("Не вводите логины, пароли, номера карт и SMS-коды." if lang == "ru" else "Логин, сырсөз, карта маалыматын жана SMS-коддорду жазбаңыз."))
+        if info.hint:
+            lines.append("• " + (f"Пользуйтесь только официальным сайтом: {info.hint}" if lang == "ru" else f"Расмий гана сайтты колдонуңуз: {info.hint}"))
+    else:
+        level_text = "СРЕДНИЙ / ПОДОЗРИТЕЛЬНЫЙ" if lang == "ru" else "ОРТОЧО / ШЕКТҮҮ"
+        lines.append(f"🟡 <b>{'Уровень риска:' if lang == 'ru' else 'Коркунуч деңгээли:'}</b> {level_text} ({result['score']}/100)")
+        lines.append(f"⚠️ <b>{'Неофициальный или сторонний ресурс' if lang == 'ru' else 'Расмий эмес же башка ресурс'}</b>\n")
+        lines.append(
+            "• Домен не найден в белом списке официальных сервисов Кыргызстана.\n"
+            "• Будьте бдительны: не переходите по неизвестным ссылкам и не оставляйте личные данные."
+            if lang == "ru" else
+            "• Домен Кыргызстандын расмий кызматтарынын ак тизмесинен табылган жок.\n"
+            "• Сак болуңуз: бейтааныш шилтемелерге өтпөңүз жана жеке маалыматыңызды калтырбаңыз."
+        )
+
     return "\n".join(lines), result
 
 
@@ -260,11 +302,6 @@ async def on_start(message: Message, state: FSMContext):
         reply_markup=main_menu_inline(lang),
         parse_mode=ParseMode.HTML,
     )
-    # Также обновляем нижнюю клавиатуру
-    await message.answer(
-        "👇",
-        reply_markup=main_menu_reply(lang),
-    )
 
 
 @dp.message(Command("menu"))
@@ -306,6 +343,8 @@ async def on_text_btn_sms(message: Message, state: FSMContext):
 @dp.message(F.text.in_([
     "🔗 Проверить ссылку",
     "🔗 Шилтемени текшерүү",
+    "Проверить ссылку",
+    "Шилтемени текшерүү",
 ]))
 async def on_text_btn_link(message: Message, state: FSMContext):
     lang = user_lang(message.from_user)
@@ -316,15 +355,13 @@ async def on_text_btn_link(message: Message, state: FSMContext):
 @dp.message(F.text.in_([
     "⚠️ Я уже попался на уловку",
     "⚠️ Мен алданып калдым",
+    "Я уже попался на уловку",
+    "Мен алданып калдым",
 ]))
 async def on_text_btn_sos(message: Message, state: FSMContext):
     await state.clear()
     lang = user_lang(message.from_user)
-    await message.answer(
-        t("sos_text", lang),
-        reply_markup=sos_inline(lang),
-        parse_mode=ParseMode.HTML,
-    )
+    await message.answer(t("feature_in_dev_sos", lang), parse_mode=ParseMode.HTML)
 
 
 @dp.message(F.text.in_([
@@ -356,30 +393,31 @@ async def on_action_chosen(call: CallbackQuery, state: FSMContext):
 
     if action == "sms":
         await state.set_state(BotStates.waiting_for_sms)
-        await call.message.answer(t("prompt_sms", lang), parse_mode=ParseMode.HTML)
+        if call.message:
+            await call.message.answer(t("prompt_sms", lang), parse_mode=ParseMode.HTML)
         await call.answer()
     elif action == "link":
         await state.set_state(BotStates.waiting_for_link)
-        await call.message.answer(t("prompt_link", lang), parse_mode=ParseMode.HTML)
+        if call.message:
+            await call.message.answer(t("prompt_link", lang), parse_mode=ParseMode.HTML)
         await call.answer()
     elif action == "sos":
         await state.clear()
-        await call.message.answer(
-            t("sos_text", lang),
-            reply_markup=sos_inline(lang),
-            parse_mode=ParseMode.HTML,
-        )
+        if call.message:
+            await call.message.answer(t("feature_in_dev_sos", lang), parse_mode=ParseMode.HTML)
         await call.answer()
     elif action == "main":
         await state.clear()
-        await call.message.answer(
-            t("menu_title", lang),
-            reply_markup=main_menu_inline(lang),
-            parse_mode=ParseMode.HTML,
-        )
+        if call.message:
+            await call.message.answer(
+                t("menu_title", lang),
+                reply_markup=main_menu_inline(lang),
+                parse_mode=ParseMode.HTML,
+            )
         await call.answer()
     elif action == "help":
-        await call.message.answer(t("help", lang))
+        if call.message:
+            await call.message.answer(t("help", lang))
         await call.answer()
 
 

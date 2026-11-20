@@ -2,6 +2,8 @@
 from types import SimpleNamespace
 from urllib.parse import unquote
 
+import pytest
+
 import bot.bot as b
 from detector.check import check
 
@@ -33,9 +35,14 @@ def test_share_only_for_risky_and_without_the_link():
 
 def test_keyboard_fits_telegram_limit():
     kb = b.result_keyboard("abcdef123456", "ky", "https://t.me/share/url?url=x")
+    assert kb is not None
     datas = [btn.callback_data for row in kb.inline_keyboard for btn in row if btn.callback_data]
     assert all(len(d.encode()) <= 64 for d in datas)
-    assert kb.inline_keyboard[1][0].url
+    assert kb.inline_keyboard[0][0].url
+
+    # Проверяем, что кнопок «Это мошенничество» и «Не мошенничество» больше нет
+    button_texts = [btn.text for row in kb.inline_keyboard for btn in row]
+    assert not any("мошенничество" in t.lower() or "алдамчылык" in t.lower() for t in button_texts)
 
 
 def test_shared_text_has_no_clickable_links():
@@ -84,4 +91,89 @@ def test_format_link_analysis():
     # Официальная ссылка
     ok_body, res_ok = b.format_link_analysis("https://mbank.kg", "ru")
     assert "Официальный проверенный ресурс" in ok_body
+
+
+def test_full_bot_flow_end_to_end():
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+    from aiogram.types import User, Message, CallbackQuery
+    from aiogram.fsm.context import FSMContext
+    from aiogram.fsm.storage.memory import MemoryStorage, StorageKey
+
+    async def _flow():
+        user = User(id=999, is_bot=False, first_name="TestUser", language_code="ru")
+        storage = MemoryStorage()
+        key = StorageKey(bot_id=1, chat_id=999, user_id=999)
+        state = FSMContext(storage=storage, key=key)
+
+        def make_msg(text):
+            m = MagicMock(spec=Message)
+            m.from_user = user
+            m.text = text
+            m.answer = AsyncMock()
+            return m
+
+        # 1. /start
+        msg = make_msg("/start")
+        await b.on_start(msg, state)
+        assert msg.answer.call_count == 1
+        assert "Sakchi AI" in msg.answer.call_args[0][0]
+        # Проверяем, что в карточке ровно 3 кнопки
+        kb = msg.answer.call_args[1]["reply_markup"]
+        assert len(kb.inline_keyboard) == 3
+
+        # 2. Переход к проверке SMS (работает)
+        msg = make_msg("💬 Проверить подозрительное SMS")
+        await b.on_text_btn_sms(msg, state)
+        assert await state.get_state() == b.BotStates.waiting_for_sms.state
+
+        # 3. Отправка SMS
+        msg = make_msg("Ваша карта заблокирована, отправьте код на 0555123456")
+        await b.on_text(msg, state)
+        assert await state.get_state() is None
+        assert "🔴" in msg.answer.call_args[0][0]
+
+        # 4. Нажатие на кнопку ссылки (работает, запрашивает ссылку)
+        msg = make_msg("🔗 Проверить ссылку")
+        await b.on_text_btn_link(msg, state)
+        assert await state.get_state() == b.BotStates.waiting_for_link.state
+        assert "Проверка интернет-ссылки" in msg.answer.call_args[0][0]
+
+        # 5. Отправка ссылки с омоглифом (mbаnk.kg с русской «а»)
+        msg = make_msg("mbаnk.kg")
+        await b.on_text(msg, state)
+        assert await state.get_state() is None
+        resp_spoof = msg.answer.call_args[0][0]
+        assert "ОПАСНАЯ ПОДДЕЛКА" in resp_spoof
+        assert "mbank.kg" in resp_spoof
+
+        # 6. Отправка официальной ссылки (https://optima24.kg)
+        await state.set_state(b.BotStates.waiting_for_link)
+        msg = make_msg("https://optima24.kg")
+        await b.on_text(msg, state)
+        assert "Официальный проверенный ресурс" in msg.answer.call_args[0][0]
+
+        # 7. Нажатие на кнопку SOS (пока в разработке)
+        msg = make_msg("⚠️ Я уже попался на уловку")
+        await b.on_text_btn_sos(msg, state)
+        assert "в разработке" in msg.answer.call_args[0][0]
+
+        # 8. Инлайн колбэк для ссылки (активирует ввод) и SOS (в разработке)
+        call = MagicMock(spec=CallbackQuery)
+        call.from_user = user
+        call.message = MagicMock()
+        call.message.answer = AsyncMock()
+        call.answer = AsyncMock()
+
+        call.data = "act:link"
+        await b.on_action_chosen(call, state)
+        assert await state.get_state() == b.BotStates.waiting_for_link.state
+
+        call.data = "act:sos"
+        call.message.answer.reset_mock()
+        await b.on_action_chosen(call, state)
+        assert "в разработке" in call.message.answer.call_args[0][0]
+
+    asyncio.run(_flow())
+
 
