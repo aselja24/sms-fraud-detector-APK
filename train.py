@@ -55,17 +55,24 @@ def main():
     X_dev, y_dev = load_dataset(args.dev)
 
     best_c = None
-    best_acc = -1.0
+    best_key = (-1.0, -1.0)
     for c in C_CANDIDATES:
         model = LogisticRegression(C=c, max_iter=1000)
         model.fit(X_train, y_train)
-        acc = risk_accuracy(model, X_dev, y_dev, FEATURE_NAMES)
-        print(f"C={c:>6}: dev accuracy (по уровню risk) = {acc:.3f}")
-        if acc > best_acc:
-            best_acc = acc
+        dev_acc = risk_accuracy(model, X_dev, y_dev, FEATURE_NAMES)
+        train_acc = risk_accuracy(model, X_train, y_train, FEATURE_NAMES)
+        print(
+            f"C={c:>6}: dev accuracy (по уровню risk) = {dev_acc:.3f}, "
+            f"train accuracy = {train_acc:.3f}"
+        )
+        # Главный критерий — accuracy на dev; при равенстве выбираем C с
+        # лучшей accuracy на train (меньше недообучения на простых случаях).
+        key = (dev_acc, train_acc)
+        if key > best_key:
+            best_key = key
             best_c = c
 
-    print(f"\nЛучший C = {best_c} (dev accuracy = {best_acc:.3f})")
+    print(f"\nЛучший C = {best_c} (dev accuracy = {best_key[0]:.3f}, train accuracy = {best_key[1]:.3f})")
 
     final_model = LogisticRegression(C=best_c, max_iter=1000)
     final_model.fit(X_train, y_train)
