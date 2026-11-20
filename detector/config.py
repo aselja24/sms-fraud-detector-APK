@@ -36,8 +36,13 @@ SUSPICIOUS_DOMAIN_WORDS = [
     "cashback",
     "bit-ly",
     "bitly",
+    "bit.ly",
     "tinyurl",
     "goo-gl",
+    "goo.gl",
+    "cutt.ly",
+    "clck.ru",
+    "is.gd",
     # Имитация национальной зоны .kg в чужом домене: "balance-kg.example",
     # "mbank.kg-verify.example", "my-beeline.kg.example". Официальные
     # *.kg-домены сюда не доходят — их раньше пропускает белый список.

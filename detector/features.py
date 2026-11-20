@@ -1,7 +1,8 @@
 """Извлечение признаков из текста SMS для модели логистической регрессии."""
 from detector.entities import find_phones, find_urls, is_fake_brand, is_foreign_phone
-from detector.lexicon import CODE_REQUEST_VERBS, PATTERNS
+from detector.lexicon import CODE_REQUEST_VERBS, NO_TRANSLIT, PATTERNS
 from detector.normalize import normalize
+from detector.translit import expand_roots
 
 # Фиксированный порядок признаков — важен для model.py (веса обучены в этом порядке).
 FEATURE_NAMES = [
@@ -36,8 +37,14 @@ _LEXICON_FEATURES = [
 ]
 
 
+# Корни в том же написании, что и нормализованный текст, плюс латинские
+# варианты: один кириллический корень ловит RU/KG, KG без раскладки и транслит.
+_ROOTS = {name: expand_roots(PATTERNS[name], NO_TRANSLIT) for name in _LEXICON_FEATURES}
+_CODE_VERBS = expand_roots(CODE_REQUEST_VERBS, NO_TRANSLIT)
+
+
 def _lexicon_hit(normalized_text: str, feature: str) -> int:
-    return int(any(root in normalized_text for root in PATTERNS[feature]))
+    return int(any(root in normalized_text for root in _ROOTS[feature]))
 
 
 def extract(text: str) -> dict[str, int]:
@@ -59,7 +66,7 @@ def extract(text: str) -> dict[str, int]:
     for name in _LEXICON_FEATURES:
         features[name] = _lexicon_hit(normalized, name)
     # «код» сам по себе есть и в легитимных SMS — нужна ещё просьба его передать.
-    asks_verb = any(verb in normalized for verb in CODE_REQUEST_VERBS)
+    asks_verb = any(verb in normalized for verb in _CODE_VERBS)
     features["asks_code"] = int(features["asks_code"] and asks_verb)
 
     return {name: features[name] for name in FEATURE_NAMES}

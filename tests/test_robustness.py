@@ -42,13 +42,52 @@ OK = [
     "Напоминаем о записи к врачу завтра в 10:00. Тел. регистратуры 0312 621234",
 ]
 
+# Языковые варианты: кыргызский без раскладки (о/у/н вместо ө/ү/ң),
+# транслит с ö/ü/ŋ, смешанные RU-KG, ссылки без https://, английский.
+LANG_FRAUD = [
+    "Сиздин картаныз боготтолду. Кодду жибериниз 0555 123456",
+    "Эсебиниз жабылат! Тез арада чалыныз +996 700 112233",
+    "Апа, тез арада акча которунуз 0770 445566, кийин айтам",
+    "Сиздин эсебиңиз бөгөттөлдү. Ырастаңыз: https://mbank-secure.example",
+    "Картаңыз токтотулду. Сырсөздү жазыңыз: 0555 778899",
+    "Сиз сыйлык утуп алдыңыз! Алуу үчүн 300 сом төлөңүз 0700 998877",
+    "Kartaŋyz bögöttöldü. Koddu jiberiŋiz 0555 123123",
+    "Siz syilyk utup aldynyz! Shilteme: https://gift-kg.example",
+    "Esebiniz jabylat, tez arada chalynyz +996 555 101010",
+    "Урматтуу клиент, ваша карта заблокирована. Кодду жибериңиз +996 555 000111",
+    "Сиздин карта блокирована, срочно чалыңыз 0312 666777",
+    "Вы утуп алдыңыз iPhone! Перейдите по ссылке https://bonus-beeline.example",
+    "Мама, бул менин жаңы номерим, срочно скинь 1500 на 0555 343434",
+    "Ваша карта заблокирована. Подтвердите данные: mbank-kg.com/verify",
+    "Вы выиграли 50 000 сом! Получите: bit.ly/3xYzQ",
+    "Kartanyz bloktoldu, kiriniz: www.optima-login.net",
+    "Служба безопасности: попытка списания. Переведите средства на безопасный счёт 0555 909090",
+    "Ваш счёт будет аннулирован в течение 24 часов. Срочно позвоните +7 495 1234567",
+    "Your card is blocked! Urgent: send the code to +44 7000111222",
+    "Congratulations, you are a winner! Claim your prize: https://gift-megacom.example",
+]
 
-@pytest.mark.parametrize("text", FRAUD)
+LANG_OK = [
+    "Сиздин кодуңуз 4821. Эч кимге айтпаңыз!",
+    "Сиздин кодунуз 4821. Эч кимге айтпаныз",
+    "Kodunuz 5521. Ech kimge aitpanyz",
+    "Мама, саат 6да үйдө болом, тамак жасап кой",
+    "Апа, эртең келем, чалып кой",
+    "Beeline: балансыңыз 50 сом. Толуктоо: beeline.kg",
+    "Урматтуу кардар, төлөм кабыл алынды. Рахмат! MBANK",
+    "Бүгүн жыйналыш саат 15:00до, кечикпегиле",
+    "Салам, кандайсың? Эртең киного барабызбы?",
+    "Алдамчылардан сак болуңуз! Банк эч качан сырсөздү сурабайт",
+    "Your verification code is 1234. Do not share it with anyone",
+]
+
+
+@pytest.mark.parametrize("text", FRAUD + LANG_FRAUD)
 def test_novel_fraud_is_high(text):
     assert check(text)["risk"] == "high"
 
 
-@pytest.mark.parametrize("text", OK)
+@pytest.mark.parametrize("text", OK + LANG_OK)
 def test_novel_ok_is_not_high(text):
     assert check(text)["risk"] != "high"
 
