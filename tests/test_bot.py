@@ -153,12 +153,17 @@ def test_full_bot_flow_end_to_end():
         await b.on_text(msg, state)
         assert "Официальный проверенный ресурс" in msg.answer.call_args[0][0]
 
-        # 7. Нажатие на кнопку SOS (пока в разработке)
+        # 7. Нажатие на кнопку SOS (интерактивный помощник)
         msg = make_msg("⚠️ Я уже попался на уловку")
         await b.on_text_btn_sos(msg, state)
-        assert "в разработке" in msg.answer.call_args[0][0]
+        sos_ans = msg.answer.call_args[0][0]
+        assert "Что делать" in sos_ans or "Эмне кылуу керек" in sos_ans
+        sos_kb = msg.answer.call_args[1]["reply_markup"]
+        sos_cbs = [btn.callback_data for row in sos_kb.inline_keyboard for btn in row]
+        assert "sos:just_opened" in sos_cbs
+        assert "sos:sent_money" in sos_cbs
 
-        # 8. Инлайн колбэк для ссылки (активирует ввод) и SOS (в разработке)
+        # 8. Инлайн колбэк для ссылки (активирует ввод) и SOS
         call = MagicMock(spec=CallbackQuery)
         call.from_user = user
         call.message = MagicMock()
@@ -172,7 +177,18 @@ def test_full_bot_flow_end_to_end():
         call.data = "act:sos"
         call.message.answer.reset_mock()
         await b.on_action_chosen(call, state)
-        assert "в разработке" in call.message.answer.call_args[0][0]
+        assert "Что делать" in call.message.answer.call_args[0][0]
+
+        # 9. Проверка сценариев интерактивного помощника
+        call.data = "sos:just_opened"
+        call.message.answer.reset_mock()
+        await b.on_sos_sub_chosen(call)
+        assert "безопасности" in call.message.answer.call_args[0][0].lower()
+
+        call.data = "sos:sent_money"
+        call.message.answer.reset_mock()
+        await b.on_sos_sub_chosen(call)
+        assert "102" in call.message.answer.call_args[0][0]
 
     asyncio.run(_flow())
 

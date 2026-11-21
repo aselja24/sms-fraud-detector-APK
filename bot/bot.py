@@ -210,8 +210,13 @@ def main_menu_reply(lang: str) -> ReplyKeyboardMarkup:
 
 
 def sos_inline(lang: str) -> InlineKeyboardMarkup:
-    """Инлайн-кнопки в разделе экстренной помощи."""
+    """Инлайн-кнопки интерактивного помощника («Я уже перешёл по ссылке / попался на уловку»)."""
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=t("sos_btn_just_opened", lang), callback_data="sos:just_opened")],
+        [InlineKeyboardButton(text=t("sos_btn_entered_phone", lang), callback_data="sos:entered_phone")],
+        [InlineKeyboardButton(text=t("sos_btn_entered_password", lang), callback_data="sos:entered_password")],
+        [InlineKeyboardButton(text=t("sos_btn_sent_code", lang), callback_data="sos:sent_code")],
+        [InlineKeyboardButton(text=t("sos_btn_sent_money", lang), callback_data="sos:sent_money")],
         [InlineKeyboardButton(text=t("btn_bank_contacts", lang), callback_data="sos:banks")],
         [InlineKeyboardButton(text=t("btn_apk_danger", lang), callback_data="sos:apk")],
         [InlineKeyboardButton(text=t("btn_back_menu", lang), callback_data="act:main")],
@@ -411,7 +416,11 @@ async def on_text_btn_link(message: Message, state: FSMContext):
 async def on_text_btn_sos(message: Message, state: FSMContext):
     await state.clear()
     lang = user_lang(message.from_user)
-    await message.answer(t("feature_in_dev_sos", lang), parse_mode=ParseMode.HTML)
+    await message.answer(
+        t("sos_wizard_title", lang),
+        reply_markup=sos_inline(lang),
+        parse_mode=ParseMode.HTML,
+    )
 
 
 @dp.message(F.text.in_([
@@ -454,7 +463,11 @@ async def on_action_chosen(call: CallbackQuery, state: FSMContext):
     elif action == "sos":
         await state.clear()
         if call.message:
-            await call.message.answer(t("feature_in_dev_sos", lang), parse_mode=ParseMode.HTML)
+            await call.message.answer(
+                t("sos_wizard_title", lang),
+                reply_markup=sos_inline(lang),
+                parse_mode=ParseMode.HTML,
+            )
         await call.answer()
     elif action == "main":
         await state.clear()
@@ -476,19 +489,25 @@ async def on_sos_sub_chosen(call: CallbackQuery):
     action = call.data.split(":", 1)[1]
     lang = user_lang(call.from_user)
 
-    if action == "banks":
-        await call.message.answer(
-            t("bank_contacts_text", lang),
-            reply_markup=sos_sub_inline(lang),
-            parse_mode=ParseMode.HTML,
-        )
+    sos_map = {
+        "just_opened": "sos_text_just_opened",
+        "entered_phone": "sos_text_entered_phone",
+        "entered_password": "sos_text_entered_password",
+        "sent_code": "sos_text_sent_code",
+        "sent_money": "sos_text_sent_money",
+        "banks": "bank_contacts_text",
+        "apk": "apk_guide",
+    }
+
+    if action in sos_map:
+        if call.message:
+            await call.message.answer(
+                t(sos_map[action], lang),
+                reply_markup=sos_sub_inline(lang),
+                parse_mode=ParseMode.HTML,
+            )
         await call.answer()
-    elif action == "apk":
-        await call.message.answer(
-            t("apk_guide", lang),
-            reply_markup=sos_sub_inline(lang),
-            parse_mode=ParseMode.HTML,
-        )
+    else:
         await call.answer()
 
 
