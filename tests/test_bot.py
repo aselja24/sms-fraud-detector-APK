@@ -117,7 +117,7 @@ def test_full_bot_flow_end_to_end():
         msg = make_msg("/start")
         await b.on_start(msg, state)
         assert msg.answer.call_count == 1
-        assert "Sakchi AI" in msg.answer.call_args[0][0]
+        assert "SakBol" in msg.answer.call_args[0][0]
         # Проверяем, что в карточке ровно 3 кнопки
         kb = msg.answer.call_args[1]["reply_markup"]
         assert len(kb.inline_keyboard) == 3
