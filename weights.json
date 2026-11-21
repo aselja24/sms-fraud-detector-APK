@@ -1,0 +1,40 @@
+{
+  "features": [
+    "has_link",
+    "asks_code",
+    "urgency",
+    "block_threat",
+    "prize",
+    "bank_operator",
+    "money_transfer",
+    "call_back",
+    "fake_brand_domain",
+    "has_phone",
+    "foreign_phone",
+    "link_action",
+    "safety_warning",
+    "action_request"
+  ],
+  "coef": [
+    0.10738825357921758,
+    1.3305104382303805,
+    1.1712933877339684,
+    1.385178275311348,
+    2.060504890346255,
+    0.3244398728887822,
+    0.2097215311016548,
+    0.6654650233398268,
+    2.1211747112165833,
+    2.448511871609217,
+    0.4258784535111941,
+    0.8325720306644742,
+    -0.4944779745571837,
+    1.6649314111167404
+  ],
+  "intercept": -3.5550446420824455,
+  "C": 1.0,
+  "trained_on": [
+    "data/sms_train.csv"
+  ],
+  "n_examples": 200
+}
